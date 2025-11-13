@@ -1,0 +1,105 @@
+## RU: Пример конфигурации для generate_wg_configs.py
+## EN: Example configuration for generate_wg_configs.py
+## RU: Реальные значения храните в wg_config.yaml (он игнорируется Git)
+## EN: Keep real values in wg_config.yaml (ignored by Git)
+
+# RU: Настройки сервера
+# EN: Server settings
+server:
+  # RU: Публичный IP или домен
+  # EN: Public IP or domain
+  endpoint: example.com
+  # RU: IPv4-адрес сервера
+  # EN: Server IPv4 address
+  ipv4: 10.0.0.1
+  # RU: IPv6-адрес сервера
+  # EN: Server IPv6 address
+  ipv6: fd00::1
+  # RU: Порт WireGuard (если не указан, выбирается случайный 1024–65535)
+  # EN: WireGuard port (random 1024–65535 if omitted)
+  port: 51820
+  # RU: Пример MTU (раскомментируйте при необходимости; оставьте пустым/удалите ключ, чтобы не выводить строку)
+  # EN: Sample MTU (uncomment if needed; keep empty/remove the key to skip the MTU line)
+  # mtu: 1420
+  # RU: Шаблон комментария MTU ({mtu} заменяется), используйте "" чтобы убрать
+  # EN: MTU comment template ({mtu} placeholder); set "" to disable
+  mtu_comment: "MTU = {mtu}"
+  # RU: IPv4 DNS-адреса, которые получат клиенты
+  # EN: IPv4 DNS addresses for clients
+  dns_ipv4:
+    - 1.1.1.1
+    - 8.8.8.8
+  # RU: IPv6 DNS-адреса, которые получат клиенты
+  # EN: IPv6 DNS addresses for clients
+  dns_ipv6:
+    - 2606:4700:4700::1111
+    - 2001:4860:4860::8888
+  # RU: Включить PersistentKeepalive на сервере
+  # EN: Enable PersistentKeepalive on the server
+  keepalive_on_server: false
+  # RU: Включить AmneziaWG-параметры в серверном конфиге
+  # EN: Enable AmneziaWG parameters in the server config
+  amneziawg_on_server: false
+  # RU: Приватный ключ сервера (Base64, 32 байта)
+  # EN: Server private key (Base64, 32 bytes)
+  private_key: "SERVER-PRIVATE-KEY"
+
+# RU: Значения по умолчанию для клиентов
+# EN: Client defaults
+client_defaults:
+  # RU: Интервал PersistentKeepalive, секунды
+  # EN: PersistentKeepalive interval, seconds
+  persistent_keepalive: 25
+  # RU: Длина vanity-префикса публичного ключа (0 отключает)
+  # EN: Vanity prefix length (0 disables)
+  vanity_length: 0
+  # RU: Необязательный комментарий MTU для клиентов ({mtu} подставляется)
+  # EN: Optional MTU comment for clients ({mtu} placeholder)
+  mtu_comment: "MTU = {mtu}"
+
+# RU: Параметры PSK
+# EN: PSK parameters
+psk:
+  # RU: Режимы: generate (один ключ) | generate_per_client (уникальные ключи) | static (используется value)
+  # EN: Modes: generate (single PSK) | generate_per_client (per client) | static (use value)
+  mode: generate
+  # RU: Значение PSK (требуется только для mode=static)
+  # EN: PSK value (required only for mode=static)
+  value: ""
+  # RU: reuse=true — переиспользовать найденный PSK в clients/, false — принудительно сгенерировать новый
+  # EN: reuse=true reuses PSK detected in clients/, false forces regeneration
+  reuse: true
+
+# RU: Параметры AmneziaWG (общие для сервера и клиентов)
+# EN: AmneziaWG parameters (shared for server and clients)
+# amneziawg:
+#   # RU: JunkPacketCount (1–128, рекомендовано 4–12)
+#   # EN: JunkPacketCount (1–128, recommended 4–12)
+#   Jc: 0
+#   # RU: JunkPacketMinSize (Jmax > Jmin < 1280)
+#   # EN: JunkPacketMinSize (Jmax > Jmin < 1280)
+#   Jmin: 0
+#   # RU: JunkPacketMaxSize (Jmin < Jmax ≤ 1280)
+#   # EN: JunkPacketMaxSize (Jmin < Jmax ≤ 1280)
+#   Jmax: 0
+#   # RU: JunkPacketDelay, мс
+#   # EN: JunkPacketDelay, ms
+#   # Jd: 0
+#   # RU: RandomDataInitiation (0 для совместимости с WireGuard)
+#   # EN: RandomDataInitiation (0 for WireGuard compatibility)
+#   S1: 0
+#   # RU: RandomDataResponse (0 для совместимости с WireGuard)
+#   # EN: RandomDataResponse (0 for WireGuard compatibility)
+#   S2: 0
+#   # RU: HandshakeInitiationType (1 для WireGuard)
+#   # EN: HandshakeInitiationType (1 for WireGuard)
+#   H1: 1
+#   # RU: HandshakeResponseType (2 для WireGuard)
+#   # EN: HandshakeResponseType (2 for WireGuard)
+#   H2: 2
+#   # RU: CookieReplyType (3 для WireGuard)
+#   # EN: CookieReplyType (3 for WireGuard)
+#   H3: 3
+#   # RU: TransportDataType (4 для WireGuard)
+#   # EN: TransportDataType (4 for WireGuard)
+#   H4: 4

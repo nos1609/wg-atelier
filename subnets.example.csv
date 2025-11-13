@@ -1,0 +1,4 @@
+# RU: name;clients — имя подсети и количество клиентов
+# EN: name;clients — subnet name and client count
+office;3
+remote;2
