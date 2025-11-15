@@ -1,9 +1,7 @@
 import argparse
 import os
 import subprocess
-import yaml
 import csv
-import qrcode
 import logging
 import time
 import random
@@ -13,6 +11,7 @@ from pathlib import Path
 import shutil
 import re
 import signal
+import locale
 
 YAML_BACKUPS_CREATED = set()
 ASSUME_YES = os.environ.get("WG_CONFIG_GEN_ASSUME_YES") == "1"
@@ -24,11 +23,57 @@ CLIENTS_DIR = OUTPUT_ROOT / "clients"
 SERVER_CONF_PATH = SERVER_DIR / "wg0.conf"
 VALIDATE_ONLY = False
 ALLOW_CONFIG_WRITES = True
+FORCE_BILINGUAL = os.environ.get("WG_ATELIER_BILINGUAL", "0") == "1"
+DEPENDENCY_HINTS = [
+    ("yaml", "pyyaml"),
+    ("qrcode", "qrcode[pil]"),
+    ("PIL", "Pillow"),
+]
+
+
+def detect_language():
+    env_override = os.environ.get("WG_ATELIER_LANG")
+    if env_override:
+        lowered = env_override.lower()
+        if lowered.startswith("ru"):
+            return "ru"
+        if lowered.startswith("en"):
+            return "en"
+    lang = ""
+    try:
+        loc = locale.getlocale() if locale else (None, None)
+        if loc and loc[0]:
+            lang = loc[0]
+        elif locale:
+            fallback = locale.getdefaultlocale()
+            if fallback and fallback[0]:
+                lang = fallback[0]
+    except Exception:
+        lang = ""
+    if lang.lower().startswith("ru"):
+        return "ru"
+    if lang.lower().startswith("en"):
+        return "en"
+    return ""
+
+
+ACTIVE_LANG = detect_language()
+
+
+def tr(ru_text, en_text):
+    if FORCE_BILINGUAL or not ACTIVE_LANG:
+        return f"{ru_text} / {en_text}"
+    return ru_text if ACTIVE_LANG == "ru" else en_text
+
+
+def tr_fmt(ru_text, en_text, **kwargs):
+    return tr(ru_text, en_text).format(**kwargs)
+
 
 # RU: Обработка Ctrl+C
 # EN: Handle Ctrl+C gracefully
 def signal_handler(sig, frame):
-    logger.error("Получено прерывание (Ctrl+C), завершаю выполнение")
+    logger.error(tr("Получено прерывание (Ctrl+C), завершаю выполнение", "Interrupt received (Ctrl+C), aborting"))
     raise KeyboardInterrupt
 
 signal.signal(signal.SIGINT, signal_handler)
@@ -53,16 +98,17 @@ def is_valid_prefix(prefix):
 # RU: Генерация PSK
 # EN: Generate a Pre-Shared Key
 def generate_psk():
-    logger.info("Генерация Pre-Shared Key")
+    logger.info(tr("Генерация Pre-Shared Key", "Generating Pre-Shared Key"))
     psk = subprocess.check_output(["wg", "genpsk"], text=True, encoding='utf-8').strip()
-    logger.debug(f"Сгенерирован PSK: {psk}")
+    logger.debug(tr_fmt("Сгенерирован PSK: {psk}", "Generated PSK: {psk}", psk=psk))
     return psk
 
 # RU: Запрос подтверждения у пользователя
 # EN: Simple Y/N confirmation helper
 def prompt_yes_no(message, default=True):
     if ASSUME_YES:
-        logger.info(f"WG_CONFIG_GEN_ASSUME_YES=1, автоматически выбираю {'Yes' if default else 'No'} для: {message}")
+        choice = "Yes" if default else "No"
+        logger.info(tr_fmt('WG_CONFIG_GEN_ASSUME_YES=1: автоматически выбираю {choice} для "{message}"', 'WG_CONFIG_GEN_ASSUME_YES=1: automatically choosing {choice} for "{message}"', choice=choice, message=message))
         return default
     suffix = "[Y/n]" if default else "[y/N]"
     while True:
@@ -73,7 +119,7 @@ def prompt_yes_no(message, default=True):
             return True
         if response in ("n", "no", "н", "нет"):
             return False
-        print("Ответьте 'y' или 'n'.")
+        print(tr("Ответьте 'y' или 'n'.", "Please answer 'y' or 'n'."))
 
 # RU: Парсинг PrivateKey и PresharedKey из клиентского .conf
 # EN: Parse PrivateKey and PresharedKey from a client config
@@ -98,10 +144,10 @@ def parse_client_keys(conf_path):
                 elif in_peer and line.startswith('PresharedKey ='):
                     psk = line.split(' = ')[1]
         if not privkey:
-            raise ValueError(f"PrivateKey не найден в {conf_path}")
+            raise ValueError(tr_fmt("PrivateKey не найден в {path}", "PrivateKey not found in {path}", path=conf_path))
         return privkey, psk
     except Exception as e:
-        logger.error(f"Ошибка парсинга {conf_path}: {e}")
+        logger.error(tr_fmt("Ошибка парсинга {path}: {error}", "Failed to parse {path}: {error}", path=conf_path, error=e))
         raise
 
 # RU: Извлечение приватного ключа сервера из server/wg0.conf
@@ -109,7 +155,7 @@ def parse_client_keys(conf_path):
 def extract_server_private_key_from_server_conf(conf_path=None):
     path = Path(conf_path) if conf_path else SERVER_CONF_PATH
     if not path.exists():
-        logger.warning(f"Файл {conf_path} не найден при попытке восстановить приватный ключ сервера")
+        logger.warning(tr_fmt("Файл {path} не найден при попытке восстановить приватный ключ сервера", "File {path} not found while trying to recover the server private key", path=conf_path))
         return None
     try:
         with path.open("r", encoding="utf-8") as f:
@@ -124,7 +170,7 @@ def extract_server_private_key_from_server_conf(conf_path=None):
                 if in_interface and stripped.startswith("PrivateKey ="):
                     return stripped.split(" = ", 1)[1]
     except Exception as e:
-        logger.error(f"Не удалось извлечь приватный ключ сервера из {conf_path}: {e}")
+        logger.error(tr_fmt("Не удалось извлечь приватный ключ сервера из {path}: {error}", "Failed to extract the server private key from {path}: {error}", path=conf_path, error=e))
     return None
 
 # RU: Создание директорий для конфигов
@@ -133,7 +179,7 @@ def ensure_dirs():
     if VALIDATE_ONLY:
         logger.debug("Режим валидации: директории server/clients не создаются")
         return
-    logger.info("Создание директорий для конфигураций")
+    logger.info(tr("Создание директорий для конфигураций", "Creating configuration directories"))
     SERVER_DIR.mkdir(parents=True, exist_ok=True)
     CLIENTS_DIR.mkdir(parents=True, exist_ok=True)
     logger.debug("Директории %s и %s готовы", SERVER_DIR, CLIENTS_DIR)
@@ -141,18 +187,18 @@ def ensure_dirs():
 # RU: Генерация стандартного ключа WireGuard
 # EN: Generate a standard WireGuard key pair
 def generate_standard_key():
-    logger.info("Генерация стандартного ключа WireGuard")
+    logger.info(tr("Генерация стандартного ключа WireGuard", "Generating a standard WireGuard key pair"))
     if not shutil.which("wg"):
-        logger.error("Утилита wg не найдена. Установите wireguard-tools")
-        raise RuntimeError("Утилита wg не найдена")
+        logger.error(tr("Утилита wg не найдена. Установите wireguard-tools", 'Utility "wg" not found. Install wireguard-tools'))
+        raise RuntimeError(tr("Утилита wg не найдена", 'Utility "wg" not found'))
     try:
         privkey = subprocess.check_output(["wg", "genkey"], text=True, encoding='utf-8').strip()
         pubkey = subprocess.check_output(["wg", "pubkey"], input=privkey, text=True, encoding='utf-8').strip()
         logger.debug(f"Сгенерированы стандартные ключи: public={pubkey}, private={privkey}")
         return pubkey, privkey
     except subprocess.CalledProcessError as e:
-        logger.error(f"Ошибка генерации стандартного ключа WireGuard: {e.stderr}")
-        raise RuntimeError(f"Ошибка генерации стандартного ключа: {e.stderr}")
+        logger.error(tr_fmt("Ошибка генерации стандартного ключа WireGuard: {error}", "Failed to generate a standard WireGuard key pair: {error}", error=e.stderr))
+        raise RuntimeError(tr_fmt("Ошибка генерации стандартного ключа: {error}", "Failed to generate the standard key: {error}", error=e.stderr))
 
 PSK_MODES = {"generate", "generate_per_client", "static"}
 
@@ -173,14 +219,14 @@ def parse_psk_settings(raw_psk):
         if not mode:
             mode = "static" if value else "generate"
         if mode not in PSK_MODES:
-            logger.warning(f"Неизвестный режим PSK '{mode}', использую 'generate'")
+            logger.warning(tr_fmt("Неизвестный режим PSK '{mode}', использую 'generate'", "Unknown PSK mode '{mode}', defaulting to 'generate'", mode=mode))
             mode = "generate"
         if settings["static_value"] and mode != "static":
             settings["force_mode_static"] = True
             mode = "static"
         settings["mode"] = mode
         if settings["mode"] == "static" and not settings["static_value"]:
-            raise ValueError("psk.mode=static требует непустого поля value")
+            raise ValueError(tr("psk.mode=static требует непустого поля value", "psk.mode=static requires a non-empty value"))
     else:
         if raw_psk in ("generate", "generate_per_client", None):
             settings["mode"] = raw_psk or "generate"
@@ -198,12 +244,12 @@ def maybe_backup_yaml(path: Path):
     backup_path = path.with_name(backup_name)
     shutil.copy2(path, backup_path)
     YAML_BACKUPS_CREATED.add(resolved)
-    logger.info(f"Создана резервная копия {backup_name} перед изменением {path.name}")
+    logger.info(tr_fmt("Создана резервная копия {backup} перед изменением {name}", "Created backup {backup} before modifying {name}", backup=backup_name, name=path.name))
 
 
 def update_yaml_field(file_path, field_path, new_value):
     if not ALLOW_CONFIG_WRITES:
-        logger.info("Режим валидации: пропускаю обновление %s", ".".join(field_path))
+        logger.info(tr("Режим валидации: пропускаю обновление %s", "Validation mode: skipping update for %s"), ".".join(field_path))
         return False
     indent = "  " * len(field_path[:-1])
     field = field_path[-1]
@@ -215,7 +261,7 @@ def update_yaml_field(file_path, field_path, new_value):
         return False
     content = path.read_text(encoding="utf-8")
     if not pattern.search(content):
-        logger.warning(f"Не удалось автоматически обновить {'.'.join(field_path)} в {file_path} — добавьте значение вручную.")
+        logger.warning(tr_fmt("Не удалось автоматически обновить {field} в {file} — добавьте значение вручную.", "Could not update {field} in {file} automatically — please edit it manually.", field=".".join(field_path), file=file_path))
         return False
     maybe_backup_yaml(path)
     path.write_text(pattern.sub(replacement, content, count=1), encoding="utf-8")
@@ -233,7 +279,7 @@ def maybe_backup_yaml(path: Path):
     backup_path = path.with_name(backup_name)
     shutil.copy2(path, backup_path)
     YAML_BACKUPS_CREATED.add(resolved)
-    logger.info(f"Создана резервная копия {backup_name} перед изменением {path.name}")
+    logger.info(tr_fmt("Создана резервная копия {backup} перед изменением {name}", "Created backup {backup} before modifying {name}", backup=backup_name, name=path.name))
 
 
 def render_mtu_comment(template, mtu_value):
@@ -270,6 +316,37 @@ def set_secure_permissions(path: Path):
             os.chmod(path, 0o600)
     except (OSError, subprocess.SubprocessError) as exc:
         logger.debug("Не удалось изменить права для %s: %s", path, exc)
+
+
+
+
+def write_text_if_changed(path: Path, content: str) -> bool:
+    """Записывает файл только при изменении содержимого. Возвращает True, если запись произошла."""
+    if VALIDATE_ONLY:
+        logger.debug("Режим валидации: запись %s пропущена", path)
+        return False
+    if path.exists():
+        try:
+            existing = path.read_text(encoding="utf-8")
+            if existing == content:
+                logger.debug("Файл %s не изменился — пропускаю запись", path)
+                return False
+        except Exception as exc:
+            logger.debug("Не удалось прочитать %s для сравнения: %s", path, exc)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def collect_missing_dependencies():
+    missing = []
+    for module_name, pip_name in DEPENDENCY_HINTS:
+        try:
+            module = __import__(module_name)
+            globals()[module_name] = module
+        except ModuleNotFoundError:
+            missing.append((module_name, pip_name))
+    return missing
 
 
 def configure_paths(args):
@@ -309,19 +386,19 @@ def resolve_server_private_key(server_cfg):
     if key:
         return key.strip()
     if SERVER_CONF_PATH.exists():
-        logger.warning("server.private_key отсутствует в %s. Найден файл %s с ключом.", CONFIG_FILE, SERVER_CONF_PATH)
-        if prompt_yes_no(f"Разрешить прочитать {SERVER_CONF_PATH}, чтобы перенести приватный ключ в {CONFIG_FILE}?",
-                         default=True):
+        logger.warning(tr("server.private_key отсутствует в %s. Найден файл %s с ключом.", "server.private_key is missing in %s. Found %s with a key."), CONFIG_FILE, SERVER_CONF_PATH)
+        ask = tr_fmt("Разрешить прочитать {server_conf}, чтобы перенести приватный ключ в {config}?", "Allow reading {server_conf} to move the private key into {config}?", server_conf=SERVER_CONF_PATH, config=CONFIG_FILE)
+        if prompt_yes_no(ask, default=True):
             legacy_key = extract_server_private_key_from_server_conf(SERVER_CONF_PATH)
             if not legacy_key:
-                raise ValueError(f"Не удалось извлечь приватный ключ из {SERVER_CONF_PATH}. Добавьте значение вручную.")
+                raise ValueError(tr_fmt("Не удалось извлечь приватный ключ из {path}. Добавьте значение вручную.", "Failed to extract the private key from {path}. Please add it manually.", path=SERVER_CONF_PATH))
             if update_yaml_field(CONFIG_FILE, ["server", "private_key"], legacy_key):
-                logger.info("server.private_key автоматически записан в %s", CONFIG_FILE)
+                logger.info(tr("server.private_key автоматически записан в %s", "server.private_key was written to %s"), CONFIG_FILE)
             else:
-                logger.warning("Не удалось перезаписать server.private_key — добавьте значение вручную.")
+                logger.warning(tr("Не удалось перезаписать server.private_key — добавьте значение вручную.", "Failed to update server.private_key automatically — please add it manually."))
             return legacy_key
-        raise ValueError("Продолжение без server.private_key запрещено. Добавьте значение вручную и повторите запуск.")
-    raise ValueError(f"Не указан server.private_key и не найден {SERVER_CONF_PATH} с действующим ключом.")
+        raise ValueError(tr("Продолжение без server.private_key запрещено. Добавьте значение вручную и повторите запуск.", "Cannot continue without server.private_key. Add the value manually and rerun."))
+    raise ValueError(tr_fmt("Не указан server.private_key и не найден {path} с действующим ключом.", "server.private_key missing and {path} with a valid key not found.", path=SERVER_CONF_PATH))
 
 def extract_static_psk_from_clients():
     root = CLIENTS_DIR
@@ -355,26 +432,26 @@ def prompt_delete_missing_subnets(csv_subnet_names):
         if name in csv_set:
             continue
         if VALIDATE_ONLY:
-            logger.warning("Подсеть %s отсутствует в %s (режим валидации, удаление пропущено)", name, SUBNETS_FILE)
+            logger.warning(tr_fmt("Подсеть {name} отсутствует в {csv} (режим валидации, удаление пропущено)", "Subnet {name} is missing from {csv} (validation mode, deletion skipped)", name=name, csv=SUBNETS_FILE))
             continue
-        prompt = input(f"Подсеть {name} отсутствует в {SUBNETS_FILE}. Удалить {root / name}? (y/n): ")
-        if prompt.lower().startswith("y"):
+        ask = tr_fmt("Подсеть {name} отсутствует в {csv}. Удалить {path}?", "Subnet {name} is missing from {csv}. Remove {path}?", name=name, csv=SUBNETS_FILE, path=root / name)
+        if prompt_yes_no(ask, default=False):
             shutil.rmtree(root / name)
-            logger.info(f"Удалены конфиги {root / name}/")
+            logger.info(tr_fmt("Удалены конфиги {path}/", "Removed configs under {path}/", path=root / name))
         else:
-            logger.warning(f"Подсеть {name} осталась в {root}, но не попадёт в новые конфиги.")
+            logger.warning(tr_fmt("Подсеть {name} осталась в {root}, но не попадёт в новые конфиги.", "Subnet {name} remains in {root} but will not be included in new configs.", name=name, root=root))
 # RU: Генерация пары ключей с красивым публичным ключом
 # EN: Generate a key pair with a vanity public key prefix
 def generate_vanity_key(prefix, client_idx, vanity_length):
-    logger.info(f"Генерация ключа для клиента {client_idx+1} с префиксом {prefix} (длина {vanity_length})")
+    logger.info(tr_fmt("Генерация ключа для клиента #{idx} с префиксом {prefix} (длина {length})", "Generating key for client #{idx} with prefix {prefix} (length {length})", idx=client_idx+1, prefix=prefix, length=vanity_length))
     start_time = time.time()
     
     if not is_valid_prefix(prefix) or vanity_length == 0:
-        logger.warning(f"Невалидный префикс {prefix} или vanity_length=0, использую стандартный ключ")
+        logger.warning(tr_fmt("Невалидный префикс {prefix} или vanity_length=0 — использую стандартный ключ", "Invalid prefix {prefix} or vanity_length=0 — falling back to a standard key", prefix=prefix))
         return generate_standard_key()
     
     if not shutil.which("wireguard-vanity-address"):
-        logger.warning("Утилита wireguard-vanity-address не найдена, использую стандартный ключ")
+        logger.warning(tr("Утилита wireguard-vanity-address не найдена, использую стандартный ключ", "wireguard-vanity-address not found, using a standard key"))
         return generate_standard_key()
     
     cmd = ["wireguard-vanity-address", "--in", str(vanity_length), prefix]
@@ -401,37 +478,38 @@ def generate_vanity_key(prefix, client_idx, vanity_length):
                         break
             except UnicodeDecodeError as e:
                 process.terminate()
-                logger.error(f"Ошибка декодирования вывода wireguard-vanity-address: {e}")
-                raise RuntimeError(f"Ошибка декодирования вывода: {e}")
+                logger.error(tr_fmt("Ошибка декодирования вывода wireguard-vanity-address: {error}", "Failed to decode wireguard-vanity-address output: {error}", error=e))
+                raise RuntimeError(tr_fmt("Ошибка декодирования вывода: {error}", "Failed to decode output: {error}", error=e))
         
         try:
             stdout, stderr = process.communicate(timeout=1)
             logger.debug(f"Вывод wireguard-vanity-address для префикса {prefix}:\n{stdout}\nОшибки: {stderr}")
         except subprocess.TimeoutExpired:
             process.kill()
-            logger.warning(f"Процесс для префикса {prefix} не завершился, принудительно остановлен")
+            logger.warning(tr_fmt("Процесс для префикса {prefix} не завершился — остановлен принудительно", "Process for prefix {prefix} did not finish and was terminated", prefix=prefix))
         
         if pubkey and privkey:
-            logger.info(f"Ключи для префикса {prefix} сгенерированы за {time.time() - start_time:.2f} сек")
+            duration = time.time() - start_time
+            logger.info(tr_fmt("Ключи для префикса {prefix} сгенерированы за {seconds:.2f} сек", "Keys for prefix {prefix} generated in {seconds:.2f} s", prefix=prefix, seconds=duration))
             return pubkey, privkey
         
-        logger.warning(f"Ключи не найдены в выводе для префикса {prefix}, использую стандартный ключ")
+        logger.warning(tr_fmt("Ключи не найдены в выводе для префикса {prefix}, использую стандартный ключ", "No keys found in the output for prefix {prefix}; using a standard key", prefix=prefix))
         return generate_standard_key()
     
     except subprocess.CalledProcessError as e:
-        logger.error(f"Ошибка вызова wireguard-vanity-address для префикса {prefix}: {e.stderr}")
-        raise RuntimeError(f"Ошибка генерации ключа для префикса {prefix}: {e.stderr}")
+        logger.error(tr_fmt("Ошибка вызова wireguard-vanity-address для префикса {prefix}: {error}", "wireguard-vanity-address call failed for prefix {prefix}: {error}", prefix=prefix, error=e.stderr))
+        raise RuntimeError(tr_fmt("Ошибка генерации ключа для префикса {prefix}: {error}", "Failed to generate key for prefix {prefix}: {error}", prefix=prefix, error=e.stderr))
     except Exception as e:
-        logger.error(f"Неожиданная ошибка при генерации ключа для префикса {prefix}: {e}")
-        raise RuntimeError(f"Неожиданная ошибка: {e}")
+        logger.error(tr_fmt("Неожиданная ошибка при генерации ключа для префикса {prefix}: {error}", "Unexpected error while generating a key for prefix {prefix}: {error}", prefix=prefix, error=e))
+        raise RuntimeError(tr_fmt("Неожиданная ошибка: {error}", "Unexpected error: {error}", error=e))
 
 # RU: Генерация серверного конфига для NetworkManager
 # EN: Build the server configuration (wg0.conf)
 def generate_server_config(config, server_privkey, server_pubkey, client_psks, subnet_indices):
-    logger.info("Генерация серверного конфига wg0.conf")
+    logger.info(tr("Генерация серверного конфига wg0.conf", "Generating server config wg0.conf"))
     port = config.get('port', random.randint(1024, 65535))
     if 'port' not in config:
-        logger.info(f"Порт не указан, выбран случайный порт: {port}")
+        logger.info(tr_fmt("Порт не указан, выбран случайный порт: {port}", "Port not specified; selected random port {port}", port=port))
     psk_mode = config.get('_psk_mode', 'generate')
     static_psk = config.get('_psk_static_value')
     common_psk = config.get('common_psk')
@@ -485,7 +563,7 @@ ListenPort = {port}
             try:
                 client_idx = int(client_name.split('_client')[1])
             except ValueError:
-                logger.warning("Неверное имя файла %s, пропускаю", conf_file)
+                logger.warning(tr("Неверное имя файла %s, пропускаю", "Invalid file name %s; skipping"), conf_file)
                 continue
             privkey, psk = parse_client_keys(conf_path)
             client_pubkey = subprocess.check_output(["wg", "pubkey"], input=privkey, text=True, encoding='utf-8').strip()
@@ -508,20 +586,21 @@ AllowedIPs = {client_ipv4}, {client_ipv6}
             server_conf += "\n"
     
     if VALIDATE_ONLY:
-        logger.info("Режим валидации: серверный конфиг не записан.")
+        logger.info(tr("Режим валидации: серверный конфиг не записан.", "Validation mode: server config not written."))
         return server_conf
 
-    with SERVER_CONF_PATH.open("w", encoding='utf-8', newline='\n') as f:
-        f.write(server_conf)
+    if not write_text_if_changed(SERVER_CONF_PATH, server_conf):
+        logger.info(tr_fmt("Серверный конфиг {path} не изменился — запись пропущена", "Server config {path} unchanged — skipping write", path=SERVER_CONF_PATH))
+        return server_conf
     set_secure_permissions(SERVER_CONF_PATH)
-    logger.info("Серверный конфиг сохранён в %s", SERVER_CONF_PATH)
+    logger.info(tr_fmt("Серверный конфиг сохранён в {path}", "Server config saved to {path}", path=SERVER_CONF_PATH))
     return server_conf
 
 # RU: Генерация клиентского конфига с поддержкой AmneziaWG
 # EN: Build client configs with optional AmneziaWG hints
 def generate_client_config(config, subnet, client_idx, client_privkey, client_pubkey, server_pubkey, psk=None):
     client_name = f"{subnet['name']}_client{client_idx+1}"
-    logger.info(f"Генерация конфига для клиента {client_name}")
+    logger.info(tr_fmt("Генерация конфига для клиента {name}", "Generating config for client {name}", name=client_name))
     client_ipv4 = f"{subnet['ipv4_base']}{client_idx+1}/32"
     client_ipv6 = f"{subnet['ipv6_base']}:{client_idx+1}/128"
     psk_mode = config.get('_psk_mode', 'generate')
@@ -584,23 +663,25 @@ AllowedIPs = 0.0.0.0/0, ::/0
         return
     subnet_dir.mkdir(parents=True, exist_ok=True)
     conf_path = subnet_dir / f"{client_name}.conf"
-    with conf_path.open("w", encoding='utf-8', newline='\n') as f:
-        f.write(client_conf)
+    if not write_text_if_changed(conf_path, client_conf):
+        logger.info(tr_fmt("Конфиг {path} не изменился — пропускаю перезапись и генерацию QR", "Client config {path} unchanged — skipping write and QR generation.", path=conf_path))
+        return
     set_secure_permissions(conf_path)
-    logger.info("Конфиг клиента сохранён в %s", conf_path)
+    logger.info(tr_fmt("Конфиг клиента сохранён в {path}", "Client config saved to {path}", path=conf_path))
     
     logger.debug("Генерация QR-кода для %s", client_name)
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(client_conf)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white")
-    qr_img.save(subnet_dir / f"{client_name}.qr.png")
-    logger.info("QR-код сохранён в %s", subnet_dir / f"{client_name}.qr.png")
+    qr_path = subnet_dir / f"{client_name}.qr.png"
+    qr_img.save(qr_path)
+    logger.info(tr_fmt("QR-код сохранён в {path}", "QR code saved to {path}", path=qr_path))
 
 # RU: Чтение подсетей из CSV
 # EN: Read subnet definitions from CSV
 def read_subnets_csv(csv_file):
-    logger.info(f"Чтение подсетей из {csv_file}")
+    logger.info(tr_fmt("Чтение подсетей из {path}", "Reading subnets from {path}", path=csv_file))
     subnets = []
     try:
         with open(csv_file, newline='', encoding='utf-8') as f:
@@ -613,18 +694,18 @@ def read_subnets_csv(csv_file):
                         subnets.append({'name': name, 'clients': count})
                         logger.debug(f"Прочитана подсеть: {name}, клиентов: {count}")
                     except ValueError:
-                        logger.warning(f"Пропущена строка с некорректным числом клиентов: {row}")
+                        logger.warning(tr_fmt("Пропущена строка с некорректным числом клиентов: {row}", "Skipped row with invalid client count: {row}", row=row))
                         continue
         if not subnets:
-            logger.warning("В файле CSV нет валидных строк с подсетями")
+            logger.warning(tr("В файле CSV нет валидных строк с подсетями", "CSV file contains no valid subnet rows"))
         else:
-            logger.info(f"Успешно прочитано {len(subnets)} подсетей из CSV")
+            logger.info(tr_fmt("Успешно прочитано {count} подсетей из CSV", "Successfully read {count} subnets from CSV", count=len(subnets)))
         return subnets
     except FileNotFoundError:
-        logger.error(f"Файл {csv_file} не найден")
+        logger.error(tr_fmt("Файл {path} не найден", "File {path} not found", path=csv_file))
         raise
     except Exception as e:
-        logger.error(f"Ошибка обработки CSV: {e}")
+        logger.error(tr_fmt("Ошибка обработки CSV: {error}", "Error processing CSV: {error}", error=e))
         raise
 
 # RU: Основная функция
@@ -632,66 +713,66 @@ def read_subnets_csv(csv_file):
 def main():
     args = parse_cli_args()
     configure_paths(args)
-    logger.info("Запуск генератора конфигураций WireGuard")
+    logger.info(tr("Запуск генератора конфигураций WireGuard", "Starting the WireGuard config generator"))
     start_time = time.time()
     if ASSUME_YES:
-        logger.warning("WG_CONFIG_GEN_ASSUME_YES=1: все запросы подтверждаются автоматически. Используйте осторожно.")
+        logger.warning(tr("WG_CONFIG_GEN_ASSUME_YES=1: все запросы подтверждаются автоматически. Используйте осторожно.", "WG_CONFIG_GEN_ASSUME_YES=1: all prompts auto-confirmed. Use with caution."))
     
-    logger.info("Проверка зависимостей")
-    try:
-        import yaml
-        import qrcode
-        import PIL
-    except ImportError as e:
-        logger.error(f"Отсутствует Python-модуль: {e}")
-        raise RuntimeError(f"Установите зависимости: pip3 install -r requirements.txt")
-    
+    logger.info(tr("Проверка зависимостей", "Checking dependencies"))
+    missing = collect_missing_dependencies()
+    if missing:
+        logger.error(tr("Не найдены обязательные Python-пакеты:", "Missing required Python packages:"))
+        for module_name, pip_name in missing:
+            logger.error(tr_fmt(" - {module}: установите через pip install {pip}", " - {module}: install via pip install {pip}", module=module_name, pip=pip_name))
+        logger.error(tr("Установите зависимости командой: pip install -r requirements.txt", "Install dependencies with: pip install -r requirements.txt"))
+        raise SystemExit(1)
+
     if not shutil.which("wg"):
-        logger.error("Утилита wg не найдена. Установите wireguard-tools")
-        raise RuntimeError("Утилита wg не найдена")
-    
+        logger.error(tr("Утилита wg не найдена. Установите wireguard-tools", 'Utility "wg" not found. Install wireguard-tools'))
+        raise RuntimeError(tr("Утилита wg не найдена", 'Utility "wg" not found'))
+
     if not VALIDATE_ONLY:
         ensure_dirs()
     else:
-        logger.info("Режим валидации: пропускаю создание каталога output.")
+        logger.info(tr("Режим валидации: пропускаю создание каталога output.", "Validation mode: skipping output directory creation."))
     
-    logger.info("Загрузка конфигурации из %s", CONFIG_FILE)
+    logger.info(tr("Загрузка конфигурации из %s", "Loading configuration from %s"), CONFIG_FILE)
     try:
         with CONFIG_FILE.open("r", encoding='utf-8') as f:
             config = yaml.safe_load(f)
         logger.debug(f"Конфигурация: {config}")
     except FileNotFoundError:
-        logger.error("Файл %s не найден", CONFIG_FILE)
+        logger.error(tr("Файл %s не найден", "File %s not found"), CONFIG_FILE)
         raise
     except yaml.YAMLError as e:
-        logger.error(f"Ошибка парсинга YAML: {e}")
+        logger.error(tr_fmt("Ошибка парсинга YAML: {error}", "YAML parsing error: {error}", error=e))
         raise
     
     server_cfg = config.get('server')
     if not isinstance(server_cfg, dict):
-        raise ValueError(f"В {CONFIG_FILE} отсутствует блок server")
+        raise ValueError(tr_fmt("В {config} отсутствует блок server", "Block 'server' is missing in {config}", config=CONFIG_FILE))
     for field in ('endpoint', 'ipv4', 'ipv6'):
         if field not in server_cfg:
-            raise ValueError(f"В блоке server отсутствует параметр {field}")
+            raise ValueError(tr_fmt("В блоке server отсутствует параметр {field}", "Parameter {field} is missing in the server block", field=field))
 
     client_defaults = config.get('client_defaults', {})
     vanity_length = client_defaults.get('vanity_length', 0) or 0
     if vanity_length > 0:
         if not shutil.which("wireguard-vanity-address"):
-            logger.error("Утилита wireguard-vanity-address не найдена, а vanity_length > 0. Установите: cargo install wireguard-vanity-address")
-            raise RuntimeError("Утилита wireguard-vanity-address не найдена")
+            logger.error(tr("Утилита wireguard-vanity-address не найдена, а vanity_length > 0. Установите: cargo install wireguard-vanity-address", "wireguard-vanity-address not found while vanity_length > 0. Install it via: cargo install wireguard-vanity-address"))
+            raise RuntimeError(tr("Утилита wireguard-vanity-address не найдена", "Utility wireguard-vanity-address not found"))
     else:
         if not shutil.which("wireguard-vanity-address"):
-            logger.info("vanity_length=0 и wireguard-vanity-address недоступна — использую стандартные ключи")
+            logger.info(tr("vanity_length=0 и wireguard-vanity-address недоступна — использую стандартные ключи", "vanity_length=0 and wireguard-vanity-address unavailable — using standard keys"))
     if vanity_length > 10:
-        logger.error("Длина vanity-префикса превышает 10 символов")
-        raise ValueError("Длина vanity-префикса не может превышать 10 символов")
+        logger.error(tr("Длина vanity-префикса превышает 10 символов", "Vanity prefix length exceeds 10 characters"))
+        raise ValueError(tr("Длина vanity-префикса не может превышать 10 символов", "Vanity prefix length must not exceed 10 characters"))
 
     server_privkey = resolve_server_private_key(server_cfg)
     try:
         server_pubkey = subprocess.check_output(["wg", "pubkey"], input=server_privkey, text=True, encoding='utf-8').strip()
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Не удалось получить публичный ключ сервера: {e.stderr}") from e
+        raise RuntimeError(tr_fmt("Не удалось получить публичный ключ сервера: {error}", "Failed to obtain the server public key: {error}", error=e.stderr)) from e
 
     # Совместимость с прежними именами ключей
     config['server_endpoint'] = server_cfg['endpoint']
@@ -718,24 +799,24 @@ def main():
     has_clients = client_conf_count > 0
     restored_psk = None
     if has_clients:
-        if prompt_yes_no(f"Найдено {client_conf_count} клиентских конфигов в {CLIENTS_DIR}. "
-                         "Разрешить прочитать их, чтобы переиспользовать текущие PSK?", default=True):
+        ask = tr_fmt("Найдено {count} клиентских конфигов в {clients_dir}. Разрешить прочитать их, чтобы переиспользовать текущие PSK?", "Found {count} client configs in {clients_dir}. Allow reading them to reuse PSK values?", count=client_conf_count, clients_dir=CLIENTS_DIR)
+        if prompt_yes_no(ask, default=True):
             restored_psk = extract_static_psk_from_clients()
             if not restored_psk:
-                logger.warning("Существующие конфиги обнаружены, но ни один не содержит PSK.")
+                logger.warning(tr("Существующие конфиги обнаружены, но ни один не содержит PSK.", "Existing configs found, but none contain a PSK."))
         else:
-            logger.info("Пропускаю чтение %s по запросу пользователя.", CLIENTS_DIR)
+            logger.info(tr("Пропускаю чтение %s по запросу пользователя.", "Skipping read of %s per user request."), CLIENTS_DIR)
 
     def persist_psk_mode(new_mode):
         if update_yaml_field(CONFIG_FILE, ["psk", "mode"], new_mode):
-            logger.info("psk.mode обновлён до '%s' в %s", new_mode, CONFIG_FILE)
+            logger.info(tr("psk.mode обновлён до '%s' в %s", "psk.mode updated to '%s' in %s"), new_mode, CONFIG_FILE)
 
     def persist_psk_value(new_value):
-        if update_yaml_field(CONFIG_FILE, ["psk", "value"], f"\"{new_value}\""):
-            logger.info("psk.value синхронизирован с %s", CONFIG_FILE)
+        if update_yaml_field(CONFIG_FILE, ["psk", "value"], f'"{new_value}"'):
+            logger.info(tr("psk.value синхронизирован с %s", "psk.value synchronized with %s"), CONFIG_FILE)
 
     if psk_settings.get('force_mode_static'):
-        logger.info("Указан psk.value при режиме != static — переключаю на static")
+        logger.info(tr("Указан psk.value при режиме != static — переключаю на static", "psk.value provided while mode != static — switching to static"))
         psk_mode = 'static'
         psk_settings['mode'] = 'static'
         persist_psk_mode('static')
@@ -748,41 +829,35 @@ def main():
         psk_settings['static_value'] = restored_psk
         persist_psk_mode('static')
         persist_psk_value(restored_psk)
-        logger.info("PSK восстановлен из существующих конфигов и записан в %s", CONFIG_FILE)
+        logger.info(tr("PSK восстановлен из существующих конфигов и записан в %s", "PSK restored from existing configs and written to %s"), CONFIG_FILE)
 
     if psk_mode == 'static' and not static_value:
         if restored_psk:
-            if prompt_yes_no("psk.mode=static, но value пуст. Найден PSK в существующих клиентах. "
-                             f"Перенести его в {CONFIG_FILE} и продолжить?", default=True):
+            ask = tr_fmt("psk.mode=static, но value пуст. Найден PSK в существующих клиентах. Перенести его в {config} и продолжить?", "psk.mode=static but value is empty. Found a PSK in existing clients. Copy it into {config} and continue?", config=CONFIG_FILE)
+            if prompt_yes_no(ask, default=True):
                 adopt_restored_psk()
             else:
-                raise ValueError("psk.value обязателен. Добавьте значение вручную и перезапустите генерацию.")
+                raise ValueError(tr("psk.value обязателен. Добавьте значение вручную и перезапустите генерацию.", "psk.value is required. Enter it manually and rerun the generator."))
         elif has_clients:
-            raise ValueError("psk.mode=static без value: найдены существующие конфиги, но PSK не удалось извлечь. "
-                             "Укажите psk.value вручную, иначе старые клиенты перестанут работать.")
+            raise ValueError(tr("psk.mode=static без value: найдены существующие конфиги, но PSK не удалось извлечь. Укажите psk.value вручную, иначе старые клиенты перестанут работать.", "psk.mode=static without value: existing configs found but PSK extraction failed. Provide psk.value manually or older clients will stop working."))
         else:
-            raise ValueError("psk.mode=static требует заполненного value.")
+            raise ValueError(tr("psk.mode=static требует заполненного value.", "psk.mode=static requires a populated value."))
 
     if psk_mode in ('generate', 'generate_per_client') and has_clients and psk_reuse:
         if restored_psk:
-            message = (f"В каталоге {CLIENTS_DIR} уже есть конфиги. Режим PSK установлен на "
-                       f"'{psk_mode}'. Найден существующий PSK. Подтянуть его в {CONFIG_FILE} и продолжить "
-                       "без изменений у пользователей? (Ответьте 'n', если хотите принудительно сгенерировать новый ключ "
-                       "и выставите psk.reuse=false перед повторным запуском.)")
+            message = tr_fmt("В каталоге {clients_dir} уже есть конфиги. Режим PSK — '{mode}'. Найден существующий PSK. Подтянуть его в {config} и продолжить без изменений у пользователей? (Ответьте 'n', если хотите принудительно сгенерировать новый ключ и выставите psk.reuse=false перед повторным запуском.)", "Configs already exist under {clients_dir}. PSK mode '{mode}' detected an existing PSK. Import it into {config} and continue without client-side changes? (Answer 'n' if you want to regenerate the key and set psk.reuse=false before rerunning.)", clients_dir=CLIENTS_DIR, mode=psk_mode, config=CONFIG_FILE)
             if prompt_yes_no(message, default=True):
                 adopt_restored_psk()
             else:
-                raise ValueError("Операция отменена пользователем. Чтобы перегенерировать ключи, установите psk.reuse=false "
-                                 "и подтвердите, что готовы обновить все клиентские конфиги.")
+                raise ValueError(tr("Операция отменена пользователем. Чтобы перегенерировать ключи, установите psk.reuse=false и подтвердите, что готовы обновить все клиентские конфиги.", "Operation canceled by user. Set psk.reuse=false and confirm you are ready to update all client configs to regenerate keys."))
         else:
-            raise ValueError(f"Найдены существующие клиенты, но PSK извлечь не удалось. "
-                             f"Укажите psk.value или удалите каталоги {CLIENTS_DIR}/<name>, чтобы сгенерировать новый ключ.")
+            raise ValueError(tr_fmt("Найдены существующие клиенты, но PSK извлечь не удалось. Укажите psk.value или удалите каталоги {client_dir}/<name>, чтобы сгенерировать новый ключ.", "Existing clients found but PSK extraction failed. Provide psk.value or remove {client_dir}/<name> to generate a new key.", client_dir=CLIENTS_DIR))
 
     if psk_mode == 'generate':
         if has_clients and not psk_reuse:
-            if not prompt_yes_no("psk.mode=generate и psk.reuse=false: будут сгенерированы новые PSK, "
-                                 "а все текущие клиенты станут недействительными. Продолжить?", default=False):
-                raise ValueError("Генерация отменена пользователем.")
+            ask = tr("psk.mode=generate и psk.reuse=false: будут сгенерированы новые PSK, а все текущие клиенты станут недействительными. Продолжить?", "psk.mode=generate with psk.reuse=false will generate new PSKs and invalidate every existing client. Continue?")
+            if not prompt_yes_no(ask, default=False):
+                raise ValueError(tr("Генерация отменена пользователем.", "Generation canceled by user."))
         generated_psk = generate_psk()
         static_value = generated_psk
         psk_mode = 'static'
@@ -790,12 +865,13 @@ def main():
         psk_settings['static_value'] = generated_psk
         persist_psk_mode('static')
         persist_psk_value(generated_psk)
-        logger.info("Сгенерирован общий PSK, записан в %s и режим переключен на static", CONFIG_FILE)
+        logger.info(tr("Сгенерирован общий PSK, записан в %s и режим переключен на static", "Generated a shared PSK, wrote it to %s, and switched mode to static"), CONFIG_FILE)
     elif psk_mode == 'generate_per_client':
         if has_clients and not psk_reuse:
-            if not prompt_yes_no("psk.mode=generate_per_client и psk.reuse=false: будут пересозданы все PSK. Продолжить?", default=False):
-                raise ValueError("Операция отменена пользователем.")
-        logger.info("Генерация индивидуальных PSK для каждого клиента")
+            ask = tr("psk.mode=generate_per_client и psk.reuse=false: будут пересозданы все PSK. Продолжить?", "psk.mode=generate_per_client with psk.reuse=false will recreate every PSK. Continue?")
+            if not prompt_yes_no(ask, default=False):
+                raise ValueError(tr("Операция отменена пользователем.", "Operation canceled by user."))
+        logger.info(tr("Генерация индивидуальных PSK для каждого клиента", "Generating individual PSKs for each client"))
 
     if psk_mode == 'static' and static_value:
         config['common_psk'] = static_value
@@ -809,37 +885,37 @@ def main():
     psk_mode = config.get('_psk_mode', 'generate')
     static_psk = config.get('_psk_static_value')
     if psk_mode == 'generate_per_client':
-        logger.info("Генерация индивидуальных PSK для каждого клиента")
+        logger.info(tr("Генерация индивидуальных PSK для каждого клиента", "Generating individual PSKs for each client"))
     elif psk_mode == 'static' and static_psk:
-        logger.info("Используется статический PSK из конфигурации")
+        logger.info(tr("Используется статический PSK из конфигурации", "Using the static PSK from configuration"))
     
     subnets = []
     if SUBNETS_FILE.exists():
         subnets = read_subnets_csv(SUBNETS_FILE)
     else:
-        logger.info("Файл %s не найден, запрашиваю подсети вручную", SUBNETS_FILE)
+        logger.info(tr("Файл %s не найден, запрашиваю подсети вручную", "File %s not found; prompting for subnets manually"), SUBNETS_FILE)
         while True:
-            name = input("Введите название подсети (или 'done' для завершения): ")
+            name = input(tr("Введите название подсети (или 'done' для завершения): ", "Enter subnet name (or 'done' to finish): "))
             if name.lower() == 'done':
                 break
             try:
-                count = int(input(f"Введите количество клиентов для {name}: "))
+                count = int(input(tr_fmt("Введите количество клиентов для {name}: ", "Enter the number of clients for {name}: ", name=name)))
                 subnets.append({'name': name, 'clients': count})
-                logger.info(f"Добавлена подсеть: {name}, клиентов: {count}")
+                logger.info(tr_fmt("Добавлена подсеть: {name}, клиентов: {count}", "Added subnet {name} with {count} clients", name=name, count=count))
             except ValueError:
-                logger.warning("Неверное количество клиентов, попробуйте снова")
-                print("Неверное количество клиентов. Попробуйте снова.")
+                logger.warning(tr("Неверное количество клиентов, попробуйте снова", "Invalid client count, try again"))
+                print(tr("Неверное количество клиентов. Попробуйте снова.", "Invalid client count. Please try again."))
     
     if not subnets:
-        logger.error("Не задано ни одной подсети, завершаю выполнение")
-        raise ValueError("Требуется хотя бы одна подсеть")
+        logger.error(tr("Не задано ни одной подсети, завершаю выполнение", "No subnets defined; exiting"))
+        raise ValueError(tr("Требуется хотя бы одна подсеть", "At least one subnet is required"))
     
     prompt_delete_missing_subnets([s['name'] for s in subnets])
-    logger.info("Сравнение CSV с существующими конфигами в %s", CLIENTS_DIR)
+    logger.info(tr("Сравнение CSV с существующими конфигами в %s", "Comparing CSV against existing configs in %s"), CLIENTS_DIR)
     subnet_indices = {}
     total_subnets = len(subnets)
     for idx, subnet in enumerate(subnets, start=1):
-        logger.info("Обработка подсети %s (%d/%d)", subnet['name'], idx, total_subnets)
+        logger.info(tr("Обработка подсети %s (%d/%d)", "Processing subnet %s (%d/%d)"), subnet['name'], idx, total_subnets)
         subnet_indices[subnet['name']] = idx
         subnet_dir = CLIENTS_DIR / subnet['name']
         subnet_idx = subnet_indices[subnet['name']]
@@ -851,12 +927,12 @@ def main():
             conf_files = sorted([f for f in os.listdir(subnet_dir) if f.endswith('.conf')])
             current_clients = len(conf_files)
             if current_clients > subnet['clients']:
-                response = input(f"В подсети {subnet['name']} в {CLIENTS_DIR} больше конфигов ({current_clients}) чем в CSV ({subnet['clients']}). Скорректировать CSV? (y/n): ")
+                response = input(tr_fmt("В подсети {name} в {root} больше конфигов ({current}) чем в CSV ({csv}). Скорректировать CSV? (y/n): ", "Subnet {name} in {root} has more configs ({current}) than the CSV ({csv}). Adjust the CSV? (y/n): ", name=subnet['name'], root=CLIENTS_DIR, current=current_clients, csv=subnet['clients']))
                 if response.lower() == 'y':
-                    print(f"Скорректируйте {SUBNETS_FILE} и запустите скрипт заново.")
+                    print(tr_fmt("Скорректируйте {path} и запустите скрипт заново.", "Adjust {path} and rerun the script.", path=SUBNETS_FILE))
                     raise SystemExit(0)
                 else:
-                    logger.warning(f"Продолжаем с CSV, но существующие конфиги в {subnet_dir} останутся")
+                    logger.warning(tr_fmt("Продолжаем с CSV, но существующие конфиги в {path} останутся", "Continuing with CSV, but existing configs in {path} will remain", path=subnet_dir))
                     subnet['clients'] = current_clients
             
             for i in range(current_clients):
@@ -872,8 +948,8 @@ def main():
                     subnet['client_keys'].append({'public': pubkey, 'private': privkey})
                     generate_client_config(config, subnet, i, privkey, pubkey, server_pubkey, client_psks.get(psk_key, config.get('common_psk')))
                 else:
-                    logger.error(f"Файл {conf_path} не существует, хотя ожидался")
-                    raise RuntimeError(f"Файл {conf_path} не существует")
+                    logger.error(tr_fmt("Файл {path} не существует, хотя ожидался", "File {path} does not exist although it was expected", path=conf_path))
+                    raise RuntimeError(tr_fmt("Файл {path} не существует", "File {path} does not exist", path=conf_path))
             
             for i in range(current_clients, subnet['clients']):
                 prefix = subnet['name'][:config.get('vanity_length', 0)]
@@ -902,21 +978,23 @@ def main():
     
     elapsed = time.time() - start_time
     if VALIDATE_ONLY:
-        logger.info("Конфигурация успешно проверена (--validate). Файлы не изменялись.")
-        logger.info(f"Проверка завершена за {elapsed:.2f} сек")
+        logger.info(tr("Конфигурация успешно проверена (--validate). Файлы не изменялись.", "Configuration validated (--validate). No files were modified."))
+        logger.info(tr_fmt("Проверка завершена за {seconds:.2f} сек", "Validation finished in {seconds:.2f} s", seconds=elapsed))
         return
     
     # RU: Управление .gitignore перенесено в репозиторий; не перезаписываем его из скрипта
     # EN: .gitignore is managed in the repo; do not overwrite it from the script
-    logger.info(f"Генерация завершена за {elapsed:.2f} сек")
+    logger.info(tr_fmt("Генерация завершена за {seconds:.2f} сек", "Generation finished in {seconds:.2f} s", seconds=elapsed))
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        logger.error("Программа прервана пользователем (Ctrl+C)")
+        logger.error(tr("Программа прервана пользователем (Ctrl+C)", "Execution interrupted by user (Ctrl+C)"))
         raise SystemExit(1)
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+        logger.error(tr_fmt("Критическая ошибка: {error}", "Critical error: {error}", error=e))
         raise
+
+
 
