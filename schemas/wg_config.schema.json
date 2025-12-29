@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "wg-atelier configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["server"],
+  "properties": {
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "ipv4", "ipv6", "private_key"],
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "Public IP or domain."
+        },
+        "ipv4": {
+          "type": "string",
+          "description": "Server IPv4 address."
+        },
+        "ipv6": {
+          "type": "string",
+          "description": "Server IPv6 address."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "WireGuard port; if omitted, one is resolved or generated."
+        },
+        "mtu": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 9000,
+          "description": "MTU value; null/omitted disables MTU output."
+        },
+        "mtu_comment": {
+          "type": ["string", "null"],
+          "description": "MTU comment template; use empty string to disable."
+        },
+        "dns_ipv4": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Client IPv4 DNS servers."
+        },
+        "dns_ipv6": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Client IPv6 DNS servers."
+        },
+        "keepalive_on_server": {
+          "type": "boolean",
+          "description": "Enable PersistentKeepalive entries in server peers."
+        },
+        "keepalive": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Server keepalive override; null uses client default."
+        },
+        "amneziawg_on_server": {
+          "type": "boolean",
+          "description": "Include AmneziaWG parameters in server config."
+        },
+        "private_key": {
+          "type": "string",
+          "description": "Server private key (Base64, 32 bytes)."
+        }
+      }
+    },
+    "client_defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "persistent_keepalive": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "PersistentKeepalive interval (seconds)."
+        },
+        "vanity_length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Vanity public key prefix length."
+        },
+        "mtu_comment": {
+          "type": ["string", "null"],
+          "description": "Client MTU comment template."
+        },
+        "generate_qr": {
+          "type": "boolean",
+          "description": "Generate QR codes for clients."
+        }
+      }
+    },
+    "psk": {
+      "description": "PSK settings. Object form is preferred; string form is treated as static PSK.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["generate", "generate_per_client", "static"]
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reuse": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "mode": { "const": "static" } }
+              },
+              "then": { "required": ["value"] }
+            }
+          ]
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "amneziawg": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "AmneziaWG parameters. Upper- or lower-case keys are accepted.",
+      "properties": {
+        "Jc": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "jc": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "Jmin": { "type": "integer", "minimum": 0, "maximum": 1280 },
+        "jmin": { "type": "integer", "minimum": 0, "maximum": 1280 },
+        "Jmax": { "type": "integer", "minimum": 0, "maximum": 1280 },
+        "jmax": { "type": "integer", "minimum": 0, "maximum": 1280 },
+        "Jd": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "jd": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "S1": { "type": "integer", "minimum": 0 },
+        "s1": { "type": "integer", "minimum": 0 },
+        "S2": { "type": "integer", "minimum": 0 },
+        "s2": { "type": "integer", "minimum": 0 },
+        "H1": { "type": "integer", "minimum": 0 },
+        "h1": { "type": "integer", "minimum": 0 },
+        "H2": { "type": "integer", "minimum": 0 },
+        "h2": { "type": "integer", "minimum": 0 },
+        "H3": { "type": "integer", "minimum": 0 },
+        "h3": { "type": "integer", "minimum": 0 },
+        "H4": { "type": "integer", "minimum": 0 },
+        "h4": { "type": "integer", "minimum": 0 },
+        "I1": { "type": "string" },
+        "I2": { "type": "string" },
+        "I3": { "type": "string" },
+        "I4": { "type": "string" },
+        "I5": { "type": "string" }
+      }
+    },
+    "amneziawg_special_packets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": ["boolean", "null"]
+        },
+        "file": {
+          "type": "string",
+          "description": "Path to JSON file with I1..I5 sets; defaults to ./amnezia-I-list.json."
+        },
+        "cycle": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "random_cycle": {
+          "type": "boolean"
+        },
+        "cycles_pool": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["per_client_random", "per_subnet_unique", "global"]
+        },
+        "reuse_within_client": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

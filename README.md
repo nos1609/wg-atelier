@@ -29,10 +29,18 @@
 ## Входные данные
 
 ### `wg_config.yaml`
+- Для автодополнения/валидации в редакторе можно добавить в начало файла строку: `# yaml-language-server: $schema=./schemas/wg_config.schema.json`.
 - блок `server`: `endpoint`, `ipv4`, `ipv6`, `private_key`, опционально `port`, `dns_ipv4`/`dns_ipv6`, `keepalive_on_server`, `amneziawg_on_server`, `mtu`, `mtu_comment`.
 - блок `client_defaults`: `persistent_keepalive`, `vanity_length`, `mtu_comment` (по умолчанию наследует серверный шаблон).
 - блок `psk`: `mode` (`generate`/`generate_per_client`/`static`), `value` для статического режима, `reuse` для переиспользования найденного значения.
 - блок `amneziawg`: параметры JunkPacket/RandomData/Handshake/Transport.
+- блок `amneziawg_special_packets`: опциональная вставка I1..I5 (Custom Protocol Signature) из JSON-файла (по умолчанию `./amnezia-I-list.json`; файл держите локально и не коммитьте).
+  - Ручные I1..I5 можно задать прямо в `amneziawg` (единый набор) — репозиторий в этом случае не используется.
+  - В репозитории есть только шаблон `amnezia-I-list.example.json`: скопируйте его в локальный `amnezia-I-list.json` и (при необходимости) укажите путь через `amneziawg_special_packets.file`. Путь резолвится относительно `wg_config.yaml`.
+  - `enabled` (`null` = авто, `false` = выключить даже при ручных I-полях), `file`, `cycle`, `random_cycle`, `cycles_pool`, `mode`, `reuse_within_client`.
+  - `mode`: `global` (один набор на всех), `per_client_random` (случайно на клиента), `per_subnet_unique` (старается раздать уникально в пределах подсети).
+  - По умолчанию выдаётся random cycle на каждый клиент (mode=per_client_random); при `mode=global` используется один набор на всех.
+  - QR с I-полями не генерируется автоматически; можно отключить QR полностью через `client_defaults.generate_qr=false`.
 
 ### `subnets.csv`
 - формат `prefix;num_clients` (см. `subnets.example.csv`).
@@ -59,6 +67,9 @@
 | `-s/--subnets` | Путь к `subnets.csv` |
 | `-o/--output-root` | Каталог, куда будут записаны `server/` и `clients/` |
 | `--validate` | Проверка конфигурации без записи файлов |
+| `--force` | Перезаписать `server/`/`clients/` и QR даже без изменений (с подтверждением; игнорируется при `--validate`) |
+
+> Важно: если задать `-o/--output-root` в каталог, который не игнорируется Git, вы получите неотслеживаемые файлы с приватными ключами. Либо не используйте `-o` (по умолчанию `server/` и `clients/` уже в `.gitignore`), либо добавьте `<output-root>/server` и `<output-root>/clients` в игноры локально.
 
 > `WG_CONFIG_GEN_ASSUME_YES=1` отключает все запросы подтверждения. Включайте только в полностью контролируемой среде.
 
@@ -71,6 +82,21 @@
 - `amneziawg_on_server` + блок `amneziawg` добавляют комментарии и параметры в `[Interface]` сервера и клиентов.
 - `persistent_keepalive` всегда прописывается клиентам; при `keepalive_on_server=true` то же значение добавляется в серверный конфиг.
 
+## Netcraze/Keenetic: импорт .conf + ASC
+
+Netcraze (бывш. Keenetic) не поддерживает I1..I5. Начиная с прошивки 5.0.2 ASC подтягивается автоматически при импорте `.conf`; в версиях до 5.0.2 прописывайте ASC вручную через Web CLI/SSH (`wireguard asc ...`).
+
+Пошагово:
+1. В веб-интерфейсе: «Интернет» → «Другие соединения» / «WireGuard» → «Импорт из файла» → загрузите клиентский `.conf`.
+2. Откройте Web CLI: замените `.../dashboard` на `.../a` (пример: `https://<router>/a`). При наличии SSH/Telnet используйте их.
+3. Узнайте имя подключения (см. в UI или в имени файла, например `anos_client3`).
+4. В Web CLI выполните по очереди:
+   - `show interface` — посмотреть список подключений и точное имя.
+   - `interface <NAME>` — перейти в контекст нужного подключения.
+   - `wireguard asc <Jc> <Jmin> <Jmax> <S1> <S2> <H1> <H2> <H3> <H4>` — применить ASC из вашего `wg_config.yaml`.
+   - `show running-config` — убедиться, что в блоке `[interface <NAME>]` появилась строка `wireguard asc ...`.
+   - `system configuration save` — сохранить изменения, чтобы не потерять их после перезагрузки.
+   Дефолт (совместимый с обычным WireGuard): `wireguard asc 0 0 0 0 0 1 2 3 4`.
 ## Vanity-ключи
 
 - Используется префикс `name[:vanity_length]`.
@@ -90,3 +116,12 @@
 - Резервные копии `wg_config.yaml.<timestamp>.bak` игнорируются Git; храните их в защищённом месте или удаляйте вручную.
 - Перед публикацией рекомендуется прогонять `gitleaks detect --source . --redact`.
 - Не используйте `WG_CONFIG_GEN_ASSUME_YES` в непроверенных окружениях: автоматическое согласие может привести к потере ключей.
+
+## Законность
+
+- Проект предназначен для администрирования WireGuard/AmneziaWG в рамках ваших собственных или явно разрешённых сетей (домашняя сеть, организация, лаборатория).
+- Используйте только там, где это разрешено законом, правилами провайдера и политиками вашей организации.
+
+
+
+

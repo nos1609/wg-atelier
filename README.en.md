@@ -29,10 +29,18 @@
 ## Inputs
 
 ### `wg_config.yaml`
+- For editor validation/autocomplete, you can add this line at the top: `# yaml-language-server: $schema=./schemas/wg_config.schema.json`.
 - `server` block: `endpoint`, `ipv4`, `ipv6`, `private_key`, optional `port`, `dns_ipv4`/`dns_ipv6`, `keepalive_on_server`, `amneziawg_on_server`, `mtu`, `mtu_comment`.
 - `client_defaults`: `persistent_keepalive`, `vanity_length`, `mtu_comment` (defaults to the server template).
 - `psk`: `mode` (`generate`/`generate_per_client`/`static`), `value` for static mode, `reuse` to pull values from existing configs.
 - `amneziawg`: JunkPacket/RandomData/Handshake/Transport parameters.
+- `amneziawg_special_packets`: optional I1..I5 (Custom Protocol Signature) insertion from a JSON file (defaults to `./amnezia-I-list.json`; keep it local and don’t commit it).
+  - Manual I1..I5 may be defined directly inside `amneziawg`; repo is skipped then.
+  - The repo only ships a template `amnezia-I-list.example.json`: copy it to your local `amnezia-I-list.json` and (if needed) point `amneziawg_special_packets.file` to it. The path is resolved relative to `wg_config.yaml`.
+  - `enabled` (`null` = auto, `false` = off even with manual I-fields), `file`, `cycle`, `random_cycle`, `cycles_pool`, `mode`, `reuse_within_client`.
+  - `mode`: `global` (one set for all), `per_client_random` (random per client), `per_subnet_unique` (tries to keep unique within a subnet).
+  - Default is per-client random cycle (`mode=per_client_random`); set `mode=global` to use one set for everyone.
+  - QR is skipped when I-fields are present; you can disable QR entirely via `client_defaults.generate_qr=false`.
 
 ### `subnets.csv`
 - Format `prefix;num_clients` (see `subnets.example.csv`).
@@ -59,6 +67,9 @@
 | `-s/--subnets` | Path to `subnets.csv` |
 | `-o/--output-root` | Directory where `server/` and `clients/` will be written |
 | `--validate` | Check configuration without writing files |
+| `--force` | Rewrite `server/`/`clients/` and QR even if unchanged (with confirmation; ignored under `--validate`) |
+
+> Important: if you set `-o/--output-root` to a directory that isn’t ignored by Git, you’ll end up with untracked files containing private keys. Either don’t use `-o` (default `server/` and `clients/` are already in `.gitignore`), or add `<output-root>/server` and `<output-root>/clients` to your local ignore rules.
 
 > `WG_CONFIG_GEN_ASSUME_YES=1` disables all confirmations. Use only in fully controlled environments.
 
@@ -71,6 +82,21 @@
 - `amneziawg_on_server` + `amneziawg` block add hints to both server and client configs.
 - `persistent_keepalive` is always written for clients; if `keepalive_on_server=true`, the same value is added to the server config.
 
+## Netcraze/Keenetic: import .conf + ASC
+
+Netcraze (formerly Keenetic) does not support I1..I5. Starting with firmware 5.0.2 ASC is applied automatically on `.conf` import; on older firmware manually set it via Web CLI/SSH (`wireguard asc ...`).
+
+Step-by-step:
+1. In the web UI: Internet → Other connections / WireGuard → “Import from file” → upload the client `.conf`.
+2. Open Web CLI: replace `.../dashboard` with `.../a` (e.g., `https://<router>/a`). If SSH/Telnet is available, prefer it.
+3. Note the connection name (from UI or filename, e.g., `anos_client3`).
+4. In Web CLI run, in order:
+   - `show interface` — view connections and exact names.
+   - `interface <NAME>` — enter that connection context.
+   - `wireguard asc <Jc> <Jmin> <Jmax> <S1> <S2> <H1> <H2> <H3> <H4>` — apply ASC from your `wg_config.yaml`.
+   - `show running-config` — ensure the `[interface <NAME>]` block contains `wireguard asc ...`.
+   - `system configuration save` — persist changes so they survive reboot.
+   Default (WireGuard-compatible): `wireguard asc 0 0 0 0 0 1 2 3 4`.
 ## Vanity keys
 
 - Uses `name[:vanity_length]` as a prefix.
@@ -89,3 +115,12 @@
 - `wg_config.yaml.<timestamp>.bak` files are ignored by Git; store or delete them manually.
 - Run `gitleaks detect --source . --redact` before publishing.
 - Avoid `WG_CONFIG_GEN_ASSUME_YES` in untrusted environments—automatic confirmation may overwrite keys/PSK.
+
+## Legal
+
+- This project is intended for administering WireGuard/AmneziaWG within networks you own or are explicitly authorized to manage (home, organization, lab).
+- Use it only where permitted by applicable law, your ISP terms, and your organization’s policies.
+
+
+
+

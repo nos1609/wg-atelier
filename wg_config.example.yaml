@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=./schemas/wg_config.schema.json
 ## RU: Пример конфигурации для generate_wg_configs.py
 ## EN: Example configuration for generate_wg_configs.py
 ## RU: Реальные значения храните в wg_config.yaml (он игнорируется Git)
@@ -37,6 +38,9 @@ server:
   # RU: Включить PersistentKeepalive на сервере
   # EN: Enable PersistentKeepalive on the server
   keepalive_on_server: false
+  # RU: Значение keepalive для пиров сервера (оставьте пустым, чтобы использовать клиентское)
+  # EN: Keepalive value for server peers (leave empty to reuse client default)
+  keepalive:
   # RU: Включить AmneziaWG-параметры в серверном конфиге
   # EN: Enable AmneziaWG parameters in the server config
   amneziawg_on_server: false
@@ -56,9 +60,10 @@ client_defaults:
   # RU: Необязательный комментарий MTU для клиентов ({mtu} подставляется)
   # EN: Optional MTU comment for clients ({mtu} placeholder)
   mtu_comment: "MTU = {mtu}"
+  # RU: Генерировать QR для клиентов (false отключает QR)
+  # EN: Generate QR codes for clients (false disables QR; QR is always skipped when I1..I5 are present)
+  generate_qr: true
 
-# RU: Параметры PSK
-# EN: PSK parameters
 psk:
   # RU: Режимы: generate (один ключ) | generate_per_client (уникальные ключи) | static (используется value)
   # EN: Modes: generate (single PSK) | generate_per_client (per client) | static (use value)
@@ -69,6 +74,35 @@ psk:
   # RU: reuse=true — переиспользовать найденный PSK в clients/, false — принудительно сгенерировать новый
   # EN: reuse=true reuses PSK detected in clients/, false forces regeneration
   reuse: true
+
+# RU: Доп. пакеты I1..I5 (Special-Junk-Packet-List) / Custom Protocol Signature
+# EN: Extra packets I1..I5 (Special-Junk-Packet-List) / Custom Protocol Signature
+# amneziawg_special_packets:
+#   # RU: Включить вставку I1..I5 (null => включить, если найден repo или заданы I1..I5 в amneziawg; false отключает всё)
+#   # EN: Enable insertion of I1..I5 (null => enable if repo or manual I1..I5 exist; false turns everything off)
+#   enabled: null
+#   # RU: JSON-файл с наборами I1..I5 (по умолчанию ./amnezia-I-list.json)
+#   # EN: JSON file with I1..I5 sets (default ./amnezia-I-list.json)
+#   file: ./amnezia-I-list.json
+#   # RU: Номер цикла (целое) или null для последнего полного набора I1..I5
+#   # EN: Cycle number (int) or null to use the latest complete I1..I5 set
+#   cycle: null
+#   # RU: random_cycle=true — выбрать случайный полный набор I1..I5
+#   # EN: random_cycle=true — pick a random full I1..I5 set
+#   random_cycle: false
+#   # RU: Ограничить пул циклов (список целых)
+#   # EN: Limit the cycle pool (list of ints)
+#   cycles_pool: []
+#   # RU: mode=global — один цикл на всех, per_client_random — случайно на клиента,
+#   # RU: per_subnet_unique — уникально в пределах подсети/пользователя
+#   # EN: mode=global uses one cycle for all; per_client_random picks per client,
+#   # EN: per_subnet_unique makes cycles unique per subnet/user
+#   mode: per_subnet_unique
+#   # RU: reuse_within_client=true — фиксировать цикл для клиента внутри запуска
+#   # EN: reuse_within_client=true keeps the cycle per client within a run
+#   reuse_within_client: false
+#   # RU: Если I1..I5 заданы в amneziawg, repo не используется.
+#   # EN: If I1..I5 are set in amneziawg, repo is skipped.
 
 # RU: Параметры AmneziaWG (общие для сервера и клиентов)
 # EN: AmneziaWG parameters (shared for server and clients)
@@ -103,3 +137,10 @@ psk:
 #   # RU: TransportDataType (4 для WireGuard)
 #   # EN: TransportDataType (4 for WireGuard)
 #   H4: 4
+#   # RU: (опционально) Ручной набор I-полей для Custom Protocol Signature
+#   # EN: (optional) Manual I-fields for Custom Protocol Signature
+#   # I1: "<b 0x...>"  # I1: Custom protocol signature part 1
+#   # I2: "<b 0x...>"  # I2: Custom protocol signature part 2
+#   # I3: "<b 0x...>"  # I3: Custom protocol signature part 3
+#   # I4: "<b 0x...>"  # I4: Custom protocol signature part 4
+#   # I5: "<b 0x...>"  # I5: Custom protocol signature part 5

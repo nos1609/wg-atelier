@@ -1,0 +1,31 @@
+{
+  "$schema": "./schemas/amnezia-I-list.schema.json",
+  "_comment_ru": "Шаблон наборов I1..I5 (Custom Protocol Signature) для AmneziaWG. Заполните своими значениями и храните реальный файл локально (не коммитьте).",
+  "_comment_en": "Template for AmneziaWG I1..I5 (Custom Protocol Signature) sets. Fill with your own values and keep the real file local (do not commit).",
+  "sets": [
+    {
+      "name": "example-set-1",
+      "I1": "<I1_PLACEHOLDER_1>",
+      "I2": "<I2_PLACEHOLDER_1>",
+      "I3": "<I3_PLACEHOLDER_1>",
+      "I4": "<I4_PLACEHOLDER_1>",
+      "I5": "<I5_PLACEHOLDER_1>"
+    },
+    {
+      "name": "example-set-2",
+      "I1": "<I1_PLACEHOLDER_2>",
+      "I2": "<I2_PLACEHOLDER_2>",
+      "I3": "<I3_PLACEHOLDER_2>",
+      "I4": "<I4_PLACEHOLDER_2>",
+      "I5": "<I5_PLACEHOLDER_2>"
+    },
+    {
+      "name": "example-set-999",
+      "I1": "<I1_PLACEHOLDER_999>",
+      "I2": "<I2_PLACEHOLDER_999>",
+      "I3": "<I3_PLACEHOLDER_999>",
+      "I4": "<I4_PLACEHOLDER_999>",
+      "I5": "<I5_PLACEHOLDER_999>"
+    }
+  ]
+}

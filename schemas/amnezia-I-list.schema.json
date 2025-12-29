@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AmneziaWG I1..I5 list",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional JSON schema reference."
+    },
+    "_comment_ru": {
+      "type": "string",
+      "description": "Russian comment."
+    },
+    "_comment_en": {
+      "type": "string",
+      "description": "English comment."
+    },
+    "sets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "I1",
+          "I2",
+          "I3",
+          "I4",
+          "I5"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Optional label for the set."
+          },
+          "I1": {
+            "type": "string"
+          },
+          "I2": {
+            "type": "string"
+          },
+          "I3": {
+            "type": "string"
+          },
+          "I4": {
+            "type": "string"
+          },
+          "I5": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "packets": {
+      "type": "object",
+      "description": "Alternative format: packets keyed by I1_c1/I2_c1/etc.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "description": "Alternative format compatible with 'sets'.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "I1",
+          "I2",
+          "I3",
+          "I4",
+          "I5"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "I1": {
+            "type": "string"
+          },
+          "I2": {
+            "type": "string"
+          },
+          "I3": {
+            "type": "string"
+          },
+          "I4": {
+            "type": "string"
+          },
+          "I5": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "sets"
+      ]
+    },
+    {
+      "required": [
+        "packets"
+      ]
+    },
+    {
+      "required": [
+        "blocks"
+      ]
+    }
+  ]
+}
