@@ -40,6 +40,7 @@
   - `enabled` (`null` = auto, `false` = off even with manual I-fields), `file`, `cycle`, `random_cycle`, `cycles_pool`, `mode`, `reuse_within_client`.
   - `mode`: `global` (one set for all), `per_client_random` (random per client), `per_subnet_unique` (tries to keep unique within a subnet).
   - Default is per-client random cycle (`mode=per_client_random`); set `mode=global` to use one set for everyone.
+  - If existing configs already contain I1..I5 but a new run does not generate them (for example, `amneziawg_special_packets` is disabled or the file is missing), the script asks to confirm removal and offers to keep the current values.
   - QR is skipped when I-fields are present; you can disable QR entirely via `client_defaults.generate_qr=false`.
 
 ### `subnets.csv`

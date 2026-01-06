@@ -1070,6 +1070,28 @@ ListenPort = {port}
                 server_conf += f"{param} = {value}\n"
 
         special_packets = select_special_packets(special_meta, "__server__") if special_meta else {}
+        existing_special = {}
+        if (
+            not VALIDATE_ONLY
+            and not FORCE_WRITE
+            and not special_packets
+            and SERVER_CONF_PATH.exists()
+            and existing_has_special(SERVER_CONF_PATH)
+        ):
+            ask = tr_fmt(
+                "В {path} уже есть I1..I5, но в новом конфиге они будут удалены. Сохранить текущие значения?",
+                "File {path} already has I1..I5, but the new config would remove them. Keep current values?",
+                path=SERVER_CONF_PATH,
+            )
+            if prompt_yes_no(ask, default=False, scope="i_fields_remove"):
+                existing_special = extract_special_packets_from_conf(SERVER_CONF_PATH)
+                if len(existing_special) != len(SPECIAL_PACKET_KEYS):
+                    logger.warning(tr(
+                        "Неполный набор I1..I5 в существующем server/wg0.conf — сохранение пропущено.",
+                        "Incomplete I1..I5 set in existing server/wg0.conf — skip preservation.",
+                    ))
+                    existing_special = {}
+
         if special_packets:
             src = special_packets.get("_special_source", DEFAULT_SPECIAL_JUNK_FILE)
             cycle = special_packets.get("_special_cycle")
@@ -1077,6 +1099,11 @@ ListenPort = {port}
             for key in SPECIAL_PACKET_KEYS:
                 if key in special_packets:
                     server_conf += f"{key} = {special_packets[key]}\n"
+        elif existing_special:
+            server_conf += "# Custom protocol signature (kept from existing config)\n"
+            for key in SPECIAL_PACKET_KEYS:
+                if key in existing_special:
+                    server_conf += f"{key} = {existing_special[key]}\n"
 
     server_conf += "\n"
     
@@ -1140,6 +1167,20 @@ def existing_has_special(path: Path) -> bool:
     return any(re.search(rf"^{k}\s*=", content, re.MULTILINE) for k in SPECIAL_PACKET_KEYS)
 
 
+def extract_special_packets_from_conf(path: Path) -> dict:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+    found = {}
+    for line in content.splitlines():
+        match = re.match(r"^(I[1-5])\s*=\s*(.+)$", line.strip())
+        if not match:
+            continue
+        found[match.group(1)] = match.group(2).strip()
+    return found
+
+
 def generate_client_config(config, subnet, client_idx, client_privkey, client_pubkey, server_pubkey, psk=None, special_meta=None):
     client_name = f"{subnet['name']}_client{client_idx+1}"
     logger.info(tr_fmt("Генерация конфига для клиента {name}", "Generating config for client {name}", name=client_name))
@@ -1149,6 +1190,9 @@ def generate_client_config(config, subnet, client_idx, client_privkey, client_pu
     psk_mode = config.get('_psk_mode', 'generate')
     static_psk = config.get('_psk_static_value')
     common_psk = config.get('common_psk')
+    subnet_dir = CLIENTS_DIR / subnet['name']
+    conf_path = subnet_dir / f"{client_name}.conf"
+    existing_special = {}
     client_conf = f"""[Interface]
 PrivateKey = {client_privkey}
 Address = {client_ipv4}, {client_ipv6}
@@ -1164,6 +1208,7 @@ Address = {client_ipv4}, {client_ipv6}
     if client_mtu_comment:
         client_conf += f"{client_mtu_comment}\n"
     
+    special_packets = {}
     if config.get('amneziawg'):
         amneziawg_params = ['Jc', 'Jmin', 'Jmax', 'Jd', 'S1', 'S2', 'H1', 'H2', 'H3', 'H4']
         amneziawg_long = {
@@ -1187,6 +1232,27 @@ Address = {client_ipv4}, {client_ipv6}
                 client_conf += f"{param} = {value}\n"
 
         special_packets = select_special_packets(special_meta, f"{subnet['name']}#{client_idx}") if special_meta else {}
+        if (
+            not VALIDATE_ONLY
+            and not FORCE_WRITE
+            and not special_packets
+            and conf_path.exists()
+            and existing_has_special(conf_path)
+        ):
+            ask = tr_fmt(
+                "В {path} уже есть I1..I5, но в новом конфиге они будут удалены. Сохранить текущие значения?",
+                "File {path} already has I1..I5, but the new config would remove them. Keep current values?",
+                path=conf_path,
+            )
+            if prompt_yes_no(ask, default=False, scope="i_fields_remove"):
+                existing_special = extract_special_packets_from_conf(conf_path)
+                if len(existing_special) != len(SPECIAL_PACKET_KEYS):
+                    logger.warning(tr(
+                        "Неполный набор I1..I5 в существующем клиентском конфиге — сохранение пропущено.",
+                        "Incomplete I1..I5 set in existing client config — skip preservation.",
+                    ))
+                    existing_special = {}
+
         if special_packets:
             src = special_packets.get("_special_source", DEFAULT_SPECIAL_JUNK_FILE)
             cycle = special_packets.get("_special_cycle")
@@ -1194,6 +1260,11 @@ Address = {client_ipv4}, {client_ipv6}
             for key in SPECIAL_PACKET_KEYS:
                 if key in special_packets:
                     client_conf += f"{key} = {special_packets[key]}\n"
+        elif existing_special:
+            client_conf += "# Custom protocol signature (kept from existing config)\n"
+            for key in SPECIAL_PACKET_KEYS:
+                if key in existing_special:
+                    client_conf += f"{key} = {existing_special[key]}\n"
 
     client_conf += f"""
 [Peer]
@@ -1239,11 +1310,9 @@ AllowedIPs = 0.0.0.0/0, ::/0
         "# I1..I5 are not supported by Netcraze/Keenetic; they are safe to ignore there.\n"
     )
     
-    subnet_dir = CLIENTS_DIR / subnet['name']
     if VALIDATE_ONLY:
         return
     subnet_dir.mkdir(parents=True, exist_ok=True)
-    conf_path = subnet_dir / f"{client_name}.conf"
 
     # Запрос перед перезаписью I-полей, если уже есть и нет FORCE_WRITE
     if not FORCE_WRITE and conf_path.exists() and special_packets and existing_has_special(conf_path):

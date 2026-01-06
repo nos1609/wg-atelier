@@ -40,6 +40,7 @@
   - `enabled` (`null` = авто, `false` = выключить даже при ручных I-полях), `file`, `cycle`, `random_cycle`, `cycles_pool`, `mode`, `reuse_within_client`.
   - `mode`: `global` (один набор на всех), `per_client_random` (случайно на клиента), `per_subnet_unique` (старается раздать уникально в пределах подсети).
   - По умолчанию выдаётся random cycle на каждый клиент (mode=per_client_random); при `mode=global` используется один набор на всех.
+  - Если в существующих конфигах уже есть I1..I5, а новый запуск их не формирует (например, блок `amneziawg_special_packets` отключён или файл не задан), скрипт попросит подтвердить удаление и предложит сохранить текущие значения.
   - QR с I-полями не генерируется автоматически; можно отключить QR полностью через `client_defaults.generate_qr=false`.
 
 ### `subnets.csv`
